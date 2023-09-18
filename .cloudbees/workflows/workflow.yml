@@ -1,0 +1,35 @@
+name: scan-build-push-harbor
+apiVersion: automation.cloudbees.io/v1alpha1
+kind: workflow
+on:
+  push:
+    branches:
+      - '**'
+jobs:
+  docker-build-push-harbor:
+    steps:
+      - name: checkout-source-code
+        uses: cloudbees-io/checkout@v1
+      - id: build-go-binary
+        name: Build Go binary
+        uses: docker://golang:1.20
+        run: |
+          echo "__________________ Building GO Binary for hello world __________________"
+          git config --system credential.helper '!f() { echo username=git; echo "password=$GIT_TOKEN"; };f'
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -tags netgo -ldflags '-w -extldflags \"-static\"' -o hello_world_app main.go
+        env:
+          GIT_TOKEN: ${{ secrets.GIT_SECRET_ACCESS_TOKEN }}
+      - id: dockerconfig
+        name: Configure container registry credentials
+        uses: cloudbees-io/configure-oci-credentials@v0
+        with:
+          registry: ${{ vars.STAGING_DOCKER_REGISTRY }}
+          username: ${{ secrets.STAGING_DOCKER_USERNAME }}
+          password: ${{ secrets.STAGING_DOCKER_PASSWORD }}
+      - name: docker build and publish
+        uses: cloudbees-io/kaniko
+        with:
+          destination: registry.saas-dev.beescloud.com/staging/hello-world:${{ cloudbees.scm.branch }}-${{ cloudbees.scm.sha }}${{ cloudbees.scm.branch == 'main' && ',registry.saas-dev.beescloud.com/staging/hello-world:latest' || '' }}
+          context: ${{ cloudbees.workspace }}
+          build-args: GH_TOKEN=${{ secrets.GIT_SECRET_ACCESS_TOKEN }}
+          labels: maintaner=sdp-pod-7,email=engineering@cloudbees.io
